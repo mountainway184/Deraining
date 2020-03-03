@@ -1,0 +1,96 @@
+def se_block(inp,channels,r=8):
+  x = GlobalAveragePooling2D()(inp)
+  x = Dense(channels//r, activation="relu")(x)
+  x = Dense(channels, activation="sigmoid")(x)
+  return Multiply()([inp, x])
+
+def fus(inp,num_filter,kernel_size,inp_size):
+  x_s = Conv2D(num_filter, kernel_size, padding = 'same', kernel_initializer = 'he_normal')(inp)
+  x_s = Activation(activation='relu')(x_s)
+  x = se_block(x_s,num_filter,r=8)
+  x = Add()([x,inp])
+  return x
+
+def up_block(inp,num_filter,kernel_size,strides):
+    x = Conv2DTranspose(num_filter, kernel_size, strides, padding='same',kernel_initializer = 'he_normal')(inp)
+    x = BatchNormalization(axis=3)(x) #???
+    x = Activation('relu')(x)
+    return x
+
+def merge_lstm(x1,x2,num_filter,kernel_size):
+    x1 = Lambda(lambda x: K.expand_dims(x, axis=1))(x1)
+    x2 = Lambda(lambda x: K.expand_dims(x, axis=1))(x2)
+    merge  = tf.keras.layers.concatenate([x1,x2], axis = 1) 
+    merge = tf.keras.layers.ConvLSTM2D(num_filter, kernel_size, padding='same', return_sequences = False, go_backwards = True,kernel_initializer = 'he_normal' )(merge)
+    return merge
+
+def dense_block(inp,num_filter,kernel_size):
+    # D1
+    x1 = BatchNormalization()(inp)
+    x1 = Activation(activation='relu')(x1)
+    x1 = Conv2D(num_filter, kernel_size, padding = 'same', kernel_initializer = 'he_normal')(x1)  
+    x1 = BatchNormalization()(x1)
+    x1 = Activation(activation='relu')(x1)
+    merge1 = concatenate([x1,inp],axis = 3)
+
+    x2 = BatchNormalization()(merge1)
+    x2 = Activation(activation='relu')(x2)
+    x2 = Conv2D(num_filter, kernel_size, padding = 'same', kernel_initializer = 'he_normal')(x2)  
+    x2 = BatchNormalization()(x2)
+    x2 = Activation(activation='relu')(x2)
+    merge2 = concatenate([inp,x1,x2], axis = 3)
+
+    x3 = BatchNormalization()(merge2)
+    x3 = Activation(activation='relu')(x3)
+    x3 = Conv2D(num_filter, kernel_size, padding = 'same', kernel_initializer = 'he_normal')(x3)  
+    x3 = BatchNormalization()(x3)
+    x3 = Activation(activation='relu')(x3)
+    merge3 = concatenate([x3,x1,inp], axis = 3)
+
+    return merge3
+
+#def BCDU_net_D3(input_size = (256,256,1)):
+def Generator(input_size = (256,256,3)):
+    N = input_size[0]
+    inputs = Input(shape=[None, None, 3])
+    conv1_1_s = Conv2D(64, kernel_size=3, padding = 'same', kernel_initializer = 'he_normal')(inputs)  
+    conv1_s = dense_block(conv1_1_s,64,3)
+    pool1_s = Conv2D(64, kernel_size=(2,2),strides=2, padding = 'same', kernel_initializer = 'he_normal')(conv1_s)  
+
+    conv2_s = dense_block(pool1_s,128,3)
+    pool2_s = Conv2D(128, kernel_size=(2,2),strides=2, padding = 'same', kernel_initializer = 'he_normal')(conv2_s)  
+
+    conv3_s = dense_block(pool2_s,256,3)
+    pool3_s = Conv2D(256, kernel_size=(2,2),strides=2, padding = 'same', kernel_initializer = 'he_normal')(conv3_s)  
+    merge_dense_s = dense_block(pool3_s,512,3)
+
+    conv1_1 = Conv2D(64, kernel_size=3, padding = 'same', kernel_initializer = 'he_normal')(inputs) 
+    conv1 = dense_block(conv1_1,64,3)
+    pool1 = Conv2D(64, kernel_size=(2,2),strides=2, padding = 'same', kernel_initializer = 'he_normal')(conv1)
+
+    conv2 = dense_block(pool1,128,3)
+    pool2 = Conv2D(128, kernel_size=(2,2),strides=2, padding = 'same', kernel_initializer = 'he_normal')(conv2)
+
+    conv3 = dense_block(pool2,256,3)
+    pool3 = Conv2D(256, kernel_size=(2,2),strides=2, padding = 'same', kernel_initializer = 'he_normal')(conv3)
+    merge_dense = dense_block(pool3,512,3)
+
+    merge_center = Add()([merge_dense,merge_dense_s])
+
+    up6 = up_block(merge_center,640,2,2)
+    up6 = merge_lstm(up6,conv3,640,3)
+    up6 = fus(up6,640,3,32)
+    up6 = dense_block(up6,320,3)
+
+    up7 = up_block(up6,320,2,2)
+    up7 = merge_lstm(up7,conv2,320,3)
+    up7 = fus(up7,320,3,64)
+    up7 = dense_block(up7,160,3)
+
+    up8 = up_block(up7,192,2,2)
+    up8 = merge_lstm(up8,conv1,192,3)
+    up8 = fus(up8,192,3,128)
+    up8 = dense_block(up8,64,3)
+    conv9 = tf.keras.layers.Conv2D(3, 1, activation='tanh')(up8)
+    model = Model(inputs = inputs, outputs = conv9)
+    return model
