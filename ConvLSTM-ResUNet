@@ -21,7 +21,9 @@ def merge_lstm(x1,x2,num_filter,kernel_size):
     x1 = Lambda(lambda x: K.expand_dims(x, axis=1))(x1)
     x2 = Lambda(lambda x: K.expand_dims(x, axis=1))(x2)
     merge  = tf.keras.layers.concatenate([x1,x2], axis = 1) 
-    merge = tf.keras.layers.ConvLSTM2D(num_filter, kernel_size, padding='same', return_sequences = False, go_backwards = True,kernel_initializer = 'he_normal' )(merge)
+    merge_1 = tf.keras.layers.ConvLSTM2D(num_filter, kernel_size, padding='same', return_sequences = False, go_backwards = True,kernel_initializer = 'he_normal' )(merge)
+    merge_2 = tf.keras.layers.ConvLSTM2D(num_filter, kernel_size, padding='same', return_sequences = False, go_backwards = False,kernel_initializer = 'he_normal' )(merge)
+    merge = concatenate([merge_1,merge_2],axis = -1)
     return merge
 
 def dense_block(inp,num_filter,kernel_size):
@@ -79,17 +81,17 @@ def Generator(input_size = (256,256,3)):
 
     up6 = up_block(merge_center,640,2,2)
     up6 = merge_lstm(up6,conv3,640,3)
-    up6 = fus(up6,640,3,32)
+    up6 = fus(up6,1280,3,32)
     up6 = dense_block(up6,320,3)
 
     up7 = up_block(up6,320,2,2)
     up7 = merge_lstm(up7,conv2,320,3)
-    up7 = fus(up7,320,3,64)
+    up7 = fus(up7,640,3,64)
     up7 = dense_block(up7,160,3)
 
     up8 = up_block(up7,192,2,2)
     up8 = merge_lstm(up8,conv1,192,3)
-    up8 = fus(up8,192,3,128)
+    up8 = fus(up8,384,3,128)
     up8 = dense_block(up8,64,3)
     conv9 = tf.keras.layers.Conv2D(3, 1, activation='tanh')(up8)
     model = Model(inputs = inputs, outputs = conv9)
